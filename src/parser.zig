@@ -19,6 +19,7 @@ pub fn run(cmd: *const command.Command, alloc: Allocator) anyerror!void {
     defer cr.deinit();
 
     var result = try cr.parse();
+    defer alloc.free(result.args);
     return result.action(result.args);
 }
 
@@ -79,13 +80,19 @@ pub fn Parser(comptime Iterator: type) type {
 
         fn finalize(self: *Self) ParseResult {
             ensure_all_required_set(self.current_command);
-            var args = self.captured_arguments.toOwnedSlice();
+            var args = self.captured_arguments.toOwnedSlice() catch {
+                fail("failed to allocate memory for captured args", .{});
+                unreachable;
+            };
 
             if (self.value_lists) |vl| {
                 var it = vl.iterator();
                 while (it.next()) |entry| {
                     var option: *command.Option = entry.key_ptr.*;
-                    option.value.string_list = entry.value_ptr.toOwnedSlice();
+                    option.value.string_list = entry.value_ptr.toOwnedSlice() catch {
+                        fail("failed to allocate memory for string list '{s}'", .{option.long_name});
+                        unreachable;
+                    };
                 }
                 self.value_lists.?.deinit();
             }
@@ -133,7 +140,11 @@ pub fn Parser(comptime Iterator: type) type {
             };
 
             if (opt == &help_option) {
-                try help.print_command_help(self.current_command, self.command_path.toOwnedSlice());
+                const command_path = self.command_path.toOwnedSlice() catch {
+                    fail("failed to allocate memory for command path", .{});
+                    unreachable;
+                };
+                try help.print_command_help(self.current_command, command_path);
                 std.os.exit(0);
             }
 
